@@ -1,148 +1,102 @@
-// --------------------------------------------
-// BASIC SETUP
-// --------------------------------------------
-const express = require("express");
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const { Configuration, OpenAIApi } = require('openai');
+
 const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http);
+const server = http.createServer(app);
+const io = new Server(server);
 
-// Use Replit/Railway port automatically
-const PORT = process.env.PORT || 3000;
+// OpenAI configuration
+const configuration = new Configuration({
+  apiKey: process.env.OPENAI_API_KEY
+});
+const openai = new OpenAIApi(configuration);
 
-// Parse form POST data
-app.use(express.urlencoded({ extended: true }));
+// Serve HTML for the chat
+app.get('/', (req, res) => {
+  res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Multichat with Bot</title>
+<style>
+body { font-family: sans-serif; padding: 20px; }
+#messages { list-style: none; padding: 0; max-height: 300px; overflow-y: auto; }
+#messages li { margin-bottom: 10px; }
+input { width: 80%; padding: 10px; }
+button { padding: 10px; }
+</style>
+</head>
+<body>
+<h2>Multichat with ChatGPT-Bot 🤖</h2>
+<ul id="messages"></ul>
+<input id="m" autocomplete="off" placeholder="Type your message..." />
+<button onclick="sendMessage()">Send</button>
 
-// --------------------------------------------
-// USER ACCOUNTS (SAVED IN MEMORY)
-// --------------------------------------------
-let accounts = {
-    // example:
-    // "alex": { password: "1234" }
-};
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const messages = document.getElementById('messages');
+const input = document.getElementById('m');
 
-// --------------------------------------------
-// SERVE LOGIN + SIGNUP PAGE
-// --------------------------------------------
-app.get("/", (req, res) => {
-    res.send(`
-        <html>
-        <body style="font-family: Arial; background:#222; color:#fff; text-align:center;">
-
-            <h1>Login</h1>
-            <form method="POST" action="/login">
-                <input name="username" placeholder="Username" required /><br><br>
-                <input name="password" type="password" placeholder="Password" required /><br><br>
-                <button>Login</button>
-            </form>
-
-            <h2>Or Create Account</h2>
-            <form method="POST" action="/signup">
-                <input name="newUser" placeholder="New Username" required /><br><br>
-                <input name="newPass" type="password" placeholder="New Password" required /><br><br>
-                <button>Create Account</button>
-            </form>
-
-        </body>
-        </html>
-    `);
+socket.on('chat message', (msg) => {
+  const li = document.createElement('li');
+  li.textContent = msg;
+  messages.appendChild(li);
+  messages.scrollTop = messages.scrollHeight;
 });
 
-// --------------------------------------------
-// LOGIN HANDLER
-// --------------------------------------------
-app.post("/login", (req, res) => {
-    const user = req.body.username;
-    const pass = req.body.password;
-
-    if (!accounts[user]) {
-        return res.send("❌ User does not exist.<br><a href='/'>Back</a>");
-    }
-
-    if (accounts[user].password !== pass) {
-        return res.send("❌ Wrong password.<br><a href='/'>Back</a>");
-    }
-
-    res.send(chatPage(user));
-});
-
-// --------------------------------------------
-// SIGNUP HANDLER
-// --------------------------------------------
-app.post("/signup", (req, res) => {
-    const user = req.body.newUser;
-    const pass = req.body.newPass;
-
-    if (accounts[user]) {
-        return res.send("❌ Username already taken.<br><a href='/'>Back</a>");
-    }
-
-    accounts[user] = { password: pass };
-
-    res.send(`Account created! <br><a href="/">Login</a>`);
-});
-
-// --------------------------------------------
-// CHAT PAGE HTML
-// --------------------------------------------
-function chatPage(username) {
-    return `
-    <html>
-    <body style="font-family: Arial; background:#111; color:white;">
-
-        <h2>Chat Room — Logged in as <b>${username}</b></h2>
-
-        <div id="messages" style="
-            height:300px;
-            overflow-y:scroll;
-            border:1px solid white;
-            padding:10px;
-            margin-bottom:10px;
-        "></div>
-
-        <input id="msg" placeholder="Type message..." style="width:70%;" />
-        <button onclick="send()">Send</button>
-
-        <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-        <script>
-            const socket = io();
-            const username = "${username}";
-
-            socket.emit("join", username);
-
-            socket.on("chat", data => {
-                let box = document.getElementById("messages");
-                box.innerHTML += "<p><b>" + data.user + ":</b> " + data.msg + "</p>";
-                box.scrollTop = box.scrollHeight;
-            });
-
-            function send() {
-                let m = document.getElementById("msg").value;
-                socket.emit("chat", { user: username, msg: m });
-                document.getElementById("msg").value = "";
-            }
-        </script>
-
-    </body>
-    </html>
-    `;
+function sendMessage() {
+  if (input.value.trim() !== '') {
+    socket.emit('chat message', input.value);
+    input.value = '';
+  }
 }
 
-// --------------------------------------------
-// SOCKET.IO EVENTS
-// --------------------------------------------
-io.on("connection", (socket) => {
-    socket.on("join", (user) => {
-        console.log(user + " joined");
-    });
-
-    socket.on("chat", (data) => {
-        io.emit("chat", data);
-    });
+input.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') sendMessage();
+});
+</script>
+</body>
+</html>
+`);
 });
 
-// --------------------------------------------
-// START SERVER
-// --------------------------------------------
-http.listen(PORT, () => {
-    console.log("Server running on port " + PORT);
+// Socket.IO events
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+
+  // Bot welcome message
+  io.emit('chat message', 'ChatGPT-Bot: Hello! I am ChatGPT-Bot 🤖');
+
+  // When user sends a message
+  socket.on('chat message', async (msg) => {
+    io.emit('chat message', msg); // Broadcast user message
+
+    try {
+      // Ask OpenAI API
+      const completion = await openai.createChatCompletion({
+        model: "gpt-3.5-turbo",
+        messages: [
+          { role: "system", content: "You are a helpful chatbot inside a chat room." },
+          { role: "user", content: msg }
+        ],
+      });
+
+      const botReply = completion.data.choices[0].message.content.trim();
+      io.emit('chat message', `ChatGPT-Bot: ${botReply}`);
+    } catch (err) {
+      console.error(err);
+      io.emit('chat message', 'ChatGPT-Bot: Sorry, something went wrong!');
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+  });
 });
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
