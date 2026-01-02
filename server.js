@@ -1,157 +1,148 @@
+// --------------------------------------------
+// BASIC SETUP
+// --------------------------------------------
 const express = require("express");
 const app = express();
 const http = require("http").createServer(app);
 const io = require("socket.io")(http);
 
-app.use(express.json());
+// Use Replit/Railway port automatically
+const PORT = process.env.PORT || 3000;
 
-// -----------------------------
-// ACCOUNTS STORED IN MEMORY
-// -----------------------------
-let accounts = [];  // Example: [{ username: "test", password: "1234" }]
+// Parse form POST data
+app.use(express.urlencoded({ extended: true }));
 
-// -----------------------------
-// SERVE HTML DIRECTLY
-// -----------------------------
+// --------------------------------------------
+// USER ACCOUNTS (SAVED IN MEMORY)
+// --------------------------------------------
+let accounts = {
+    // example:
+    // "alex": { password: "1234" }
+};
+
+// --------------------------------------------
+// SERVE LOGIN + SIGNUP PAGE
+// --------------------------------------------
 app.get("/", (req, res) => {
     res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Chat</title>
-    <script src="/socket.io/socket.io.js"></script>
-</head>
+        <html>
+        <body style="font-family: Arial; background:#222; color:#fff; text-align:center;">
 
-<body>
-    <div id="login">
-        <h2>Login / Signup</h2>
+            <h1>Login</h1>
+            <form method="POST" action="/login">
+                <input name="username" placeholder="Username" required /><br><br>
+                <input name="password" type="password" placeholder="Password" required /><br><br>
+                <button>Login</button>
+            </form>
 
-        <input id="user" placeholder="Username"><br>
-        <input id="pass" type="password" placeholder="Password"><br>
+            <h2>Or Create Account</h2>
+            <form method="POST" action="/signup">
+                <input name="newUser" placeholder="New Username" required /><br><br>
+                <input name="newPass" type="password" placeholder="New Password" required /><br><br>
+                <button>Create Account</button>
+            </form>
 
-        <button onclick="login()">Login</button>
-        <button onclick="signup()">Signup</button>
-
-        <p id="msg"></p>
-    </div>
-
-    <div id="chat" style="display:none;">
-        <h2>Chat Room</h2>
-
-        <ul id="messages"></ul>
-
-        <input id="text" autocomplete="off">
-        <button onclick="sendMsg()">Send</button>
-    </div>
-
-<script>
-const socket = io();
-
-// SIGNUP
-function signup() {
-    fetch("/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            username: user.value,
-            password: pass.value
-        })
-    })
-    .then(r => r.json())
-    .then(data => {
-        msg.innerText = data.success
-            ? "Account created!"
-            : data.msg;
-    });
-}
-
-// LOGIN
-function login() {
-    fetch("/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            username: user.value,
-            password: pass.value
-        })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (!data.success) {
-            msg.innerText = data.msg;
-            return;
-        }
-
-        // SUCCESS -> show chat
-        document.getElementById("login").style.display = "none";
-        document.getElementById("chat").style.display = "block";
-
-        socket.emit("setUser", user.value);
-    });
-}
-
-// RECEIVE CHAT
-socket.on("chat message", msg => {
-    const li = document.createElement("li");
-    li.textContent = msg;
-    messages.appendChild(li);
-});
-
-// SEND CHAT
-function sendMsg() {
-    socket.emit("chat message", text.value);
-    text.value = "";
-}
-</script>
-
-</body>
-</html>
+        </body>
+        </html>
     `);
 });
 
-// -----------------------------
-// API ROUTES
-// -----------------------------
-
-// SIGNUP
-app.post("/signup", (req, res) => {
-    const { username, password } = req.body;
-
-    if (accounts.find(u => u.username === username))
-        return res.json({ success: false, msg: "Username already exists" });
-
-    accounts.push({ username, password });
-    return res.json({ success: true });
-});
-
-// LOGIN
+// --------------------------------------------
+// LOGIN HANDLER
+// --------------------------------------------
 app.post("/login", (req, res) => {
-    const { username, password } = req.body;
+    const user = req.body.username;
+    const pass = req.body.password;
 
-    const user = accounts.find(
-        u => u.username === username && u.password === password
-    );
+    if (!accounts[user]) {
+        return res.send("❌ User does not exist.<br><a href='/'>Back</a>");
+    }
 
-    if (!user)
-        return res.json({ success: false, msg: "Wrong username or password" });
+    if (accounts[user].password !== pass) {
+        return res.send("❌ Wrong password.<br><a href='/'>Back</a>");
+    }
 
-    return res.json({ success: true });
+    res.send(chatPage(user));
 });
 
-// -----------------------------
-// SOCKET CHAT
-// -----------------------------
-io.on("connection", socket => {
-    let username = "Unknown";
+// --------------------------------------------
+// SIGNUP HANDLER
+// --------------------------------------------
+app.post("/signup", (req, res) => {
+    const user = req.body.newUser;
+    const pass = req.body.newPass;
 
-    socket.on("setUser", user => {
-        username = user;
+    if (accounts[user]) {
+        return res.send("❌ Username already taken.<br><a href='/'>Back</a>");
+    }
+
+    accounts[user] = { password: pass };
+
+    res.send(`Account created! <br><a href="/">Login</a>`);
+});
+
+// --------------------------------------------
+// CHAT PAGE HTML
+// --------------------------------------------
+function chatPage(username) {
+    return `
+    <html>
+    <body style="font-family: Arial; background:#111; color:white;">
+
+        <h2>Chat Room — Logged in as <b>${username}</b></h2>
+
+        <div id="messages" style="
+            height:300px;
+            overflow-y:scroll;
+            border:1px solid white;
+            padding:10px;
+            margin-bottom:10px;
+        "></div>
+
+        <input id="msg" placeholder="Type message..." style="width:70%;" />
+        <button onclick="send()">Send</button>
+
+        <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+        <script>
+            const socket = io();
+            const username = "${username}";
+
+            socket.emit("join", username);
+
+            socket.on("chat", data => {
+                let box = document.getElementById("messages");
+                box.innerHTML += "<p><b>" + data.user + ":</b> " + data.msg + "</p>";
+                box.scrollTop = box.scrollHeight;
+            });
+
+            function send() {
+                let m = document.getElementById("msg").value;
+                socket.emit("chat", { user: username, msg: m });
+                document.getElementById("msg").value = "";
+            }
+        </script>
+
+    </body>
+    </html>
+    `;
+}
+
+// --------------------------------------------
+// SOCKET.IO EVENTS
+// --------------------------------------------
+io.on("connection", (socket) => {
+    socket.on("join", (user) => {
+        console.log(user + " joined");
     });
 
-    socket.on("chat message", msg => {
-        io.emit("chat message", username + ": " + msg);
+    socket.on("chat", (data) => {
+        io.emit("chat", data);
     });
 });
 
-// -----------------------------
-http.listen(3000, () => console.log("Server running on port 3000"));
+// --------------------------------------------
+// START SERVER
+// --------------------------------------------
+http.listen(PORT, () => {
+    console.log("Server running on port " + PORT);
+});
