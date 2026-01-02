@@ -1,0 +1,14 @@
+module.exports = {
+    users: [
+        // Example user:
+        // { username: "test", password: "1234" }
+    ],
+
+    addUser(username, password) {
+        this.users.push({ username, password });
+    },
+
+    findUser(username) {
+        return this.users.find(u => u.username === username);
+    }
+};
