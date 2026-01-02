@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat</title>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div id="login">
+        <h2>Login</h2>
+        <input id="user" placeholder="Username"><br>
+        <input id="pass" placeholder="Password" type="password"><br>
+        <button onclick="login()">Login</button>
+        <button onclick="signup()">Sign Up</button>
+        <p id="msg"></p>
+    </div>
+
+    <div id="chat" style="display:none;">
+        <h2>Chat</h2>
+        <ul id="messages"></ul>
+
+        <input id="m" autocomplete="off">
+        <button onclick="send()">Send</button>
+    </div>
+
+<script>
+const socket = io();
+
+function login() {
+    const username = user.value;
+    const password = pass.value;
+
+    fetch("/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) return msg.innerText = data.msg;
+
+        socket.emit("setUsername", username);
+        login.style.display = "none";
+        chat.style.display = "block";
+    });
+}
+
+function signup() {
+    const username = user.value;
+    const password = pass.value;
+
+    fetch("/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+    })
+    .then(r => r.json())
+    .then(data => {
+        msg.innerText = data.success ? "Account created!" : data.msg;
+    });
+}
+
+socket.on("chat message", msg => {
+    const li = document.createElement("li");
+    li.textContent = msg;
+    messages.appendChild(li);
+});
+
+function send() {
+    socket.emit("chat message", m.value);
+    m.value = "";
+}
+</script>
+
+</body>
+</html>
